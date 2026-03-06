@@ -1,0 +1,227 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_URL")
+}
+
+// User: App user, part of one or more teams
+model User {
+  id            Int          @id @default(autoincrement())
+  email         String       @unique
+  name          String?
+  passwordHash  String
+  role          UserRole     @default(MEMBER)
+  image         String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+  // Relations
+  teams         TeamMember[]
+  prompts       Prompt[]     @relation("PromptOwner")
+  promptTests   PromptTest[]
+  promptVersions PromptVersion[] @relation("PromptVersionAuthor")
+  comments      Comment[]
+  activityLogs  ActivityLog[]
+}
+
+// Team: Shared workspace for users
+model Team {
+  id               Int             @id @default(autoincrement())
+  name             String
+  ownerId          Int
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+  deletedAt        DateTime?
+  stripeCustomerId String?         @unique
+  stripeProductId  String?
+  subscriptionStatus String?
+  planName         String?
+  teamMembers      TeamMember[]
+  prompts          Prompt[]        @relation("PromptTeam")
+  apiKeys          ApiKey[]
+  activityLogs     ActivityLog[]
+  // Relations
+  owner            User            @relation(fields: [ownerId], references: [id])
+}
+
+// TeamMember: Membership of user in a team
+model TeamMember {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  teamId    Int
+  role      UserRole @default(MEMBER)
+  joinedAt  DateTime @default(now())
+  invitedBy Int?
+  user      User     @relation(fields: [userId], references: [id])
+  team      Team     @relation(fields: [teamId], references: [id])
+}
+
+// Prompt: Main entity for prompt library and versioning
+model Prompt {
+  id             Int            @id @default(autoincrement())
+  name           String
+  description    String?
+  promptContent  String
+  model          String
+  tags           PromptTag[]
+  variables      PromptVariable[]
+  ownerId        Int
+  teamId         Int
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
+  versions       PromptVersion[]
+  favorites      FavoritePrompt[]
+  folders        FolderPrompt[]
+  owner          User           @relation("PromptOwner", fields: [ownerId], references: [id])
+  team           Team           @relation("PromptTeam", fields: [teamId], references: [id])
+}
+
+// PromptVersion: Tracks all changes and restores
+model PromptVersion {
+  id             Int        @id @default(autoincrement())
+  versionNumber  Int
+  promptId       Int
+  promptContent  String
+  model          String
+  authorId       Int
+  creationNote   String?
+  createdAt      DateTime   @default(now())
+  prompt         Prompt     @relation(fields: [promptId], references: [id])
+  author         User       @relation("PromptVersionAuthor", fields: [authorId], references: [id])
+}
+
+// PromptTest: Stores runs of a prompt, test-cases results
+model PromptTest {
+  id          Int          @id @default(autoincrement())
+  promptId    Int
+  versionId   Int
+  testerId    Int
+  variables   Json
+  response    String?
+  responseTime Int
+  tokenUsage  Int?
+  error       String?
+  createdAt   DateTime     @default(now())
+  prompt      Prompt       @relation(fields: [promptId], references: [id])
+  version     PromptVersion @relation(fields: [versionId], references: [id])
+  tester      User         @relation(fields: [testerId], references: [id])
+}
+
+// PromptTag: Tags for prompt filtering/search
+model PromptTag {
+  id        Int      @id @default(autoincrement())
+  value     String
+  promptId  Int
+  prompt    Prompt   @relation(fields: [promptId], references: [id])
+}
+
+// PromptVariable: Variables that parameterize the prompt
+model PromptVariable {
+  id        Int      @id @default(autoincrement())
+  name      String
+  type      String
+  promptId  Int
+  prompt    Prompt   @relation(fields: [promptId], references: [id])
+}
+
+// FavoritePrompt: Per-user favorited prompt
+model FavoritePrompt {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  promptId  Int
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id])
+  prompt    Prompt   @relation(fields: [promptId], references: [id])
+}
+
+// Folder: Collection/folder feature for prompt organization
+model Folder {
+  id        Int           @id @default(autoincrement())
+  name      String
+  teamId    Int
+  prompts   FolderPrompt[]
+  createdAt DateTime      @default(now())
+  team      Team          @relation(fields: [teamId], references: [id])
+}
+
+// FolderPrompt: M2M relation between Folder and Prompt
+model FolderPrompt {
+  id        Int      @id @default(autoincrement())
+  folderId  Int
+  promptId  Int
+  folder    Folder   @relation(fields: [folderId], references: [id])
+  prompt    Prompt   @relation(fields: [promptId], references: [id])
+}
+
+// Comment: Team comments on prompts/versions
+model Comment {
+  id          Int         @id @default(autoincrement())
+  promptId    Int
+  authorId    Int
+  content     String
+  createdAt   DateTime    @default(now())
+  prompt      Prompt      @relation(fields: [promptId], references: [id])
+  author      User        @relation(fields: [authorId], references: [id])
+}
+
+// ActivityLog: Audit activity of prompt/test/edit, team/user
+model ActivityLog {
+  id          Int        @id @default(autoincrement())
+  action      String
+  userId      Int
+  teamId      Int?
+  promptId    Int?
+  meta        Json?
+  timestamp   DateTime   @default(now())
+  user        User       @relation(fields: [userId], references: [id])
+  team        Team?      @relation(fields: [teamId], references: [id])
+  prompt      Prompt?    @relation(fields: [promptId], references: [id])
+}
+
+// ApiKey: External access keys to Prompt API
+model ApiKey {
+  id         Int      @id @default(autoincrement())
+  key        String   @unique
+  teamId     Int
+  createdAt  DateTime @default(now())
+  expiresAt  DateTime?
+  revoked    Boolean  @default(false)
+  team       Team     @relation(fields: [teamId], references: [id])
+  usageLogs  ApiKeyUsage[]
+}
+
+// ApiKeyUsage: Logs API usage stats for rate limit/analytics
+model ApiKeyUsage {
+  id         Int      @id @default(autoincrement())
+  apiKeyId   Int
+  endpoint   String
+  usedAt     DateTime @default(now())
+  success    Boolean
+  teamId     Int
+  apiKey     ApiKey   @relation(fields: [apiKeyId], references: [id])
+  team       Team     @relation(fields: [teamId], references: [id])
+}
+
+// Analytics for prompt usage, errors, top prompts, etc. (Summary stats)
+model PromptAnalytics {
+  id            Int       @id @default(autoincrement())
+  promptId      Int
+  runs          Int       @default(0)
+  avgLatency    Float     @default(0)
+  tokenUsage    Int       @default(0)
+  errorCount    Int       @default(0)
+  lastRunAt     DateTime?
+  prompt        Prompt    @relation(fields: [promptId], references: [id])
+}
+
+// Enums
+enum UserRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
